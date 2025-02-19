@@ -1,47 +1,53 @@
+import utilities
+
 import logging
-import os
 import sys
 from time import sleep
 
 import streamlit as st
+from llama_index.core import SimpleDirectoryReader, ChatPromptTemplate
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.llms import LLM
-
+from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.llms.groq import Groq
 from qdrant_client import models, QdrantClient
-from llama_index.core import SimpleDirectoryReader, ChatPromptTemplate
-from llama_index.embeddings.fastembed import FastEmbedEmbedding
-
-from message_template import message_templates
 
 
 @st.cache_resource
-def initialize_models():
-    groq_api_key = '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'
-    os.environ['GROQ_API_KEY'] = groq_api_key
-
-    embedding_model_name = 'thenlper/gte-large'
-    ll_model_name = 'deepseek-r1-distill-llama-70b'
-
-    qdrant_url = 'https://98a27e1e-d49f-4ae4-bbe8-88494b4628af.eu-west-1-0.aws.cloud.qdrant.io'
-    qdrant_api_key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwiZXhwIjoxNzQ3MDUyMDQyfQ._-VLuwhLETrQIywI9nmd9xWmaf5HRcHdHiyIYvFghxE'
+def initialize_embedding_model() -> BaseEmbedding:
+    embedding_model_name = "thenlper/gte-large"
 
     embedding_model = FastEmbedEmbedding(model_name=embedding_model_name)
-    ll_model = Groq(model=ll_model_name)
+    return embedding_model
+
+
+@st.cache_resource
+def initialize_vector_client() -> QdrantClient:
+    qdrant_url = "https://98a27e1e-d49f-4ae4-bbe8-88494b4628af.eu-west-1-0.aws.cloud.qdrant.io"
+    qdrant_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwiZXhwIjoxNzQ3MDUyMDQyfQ._-VLuwhLETrQIywI9nmd9xWmaf5HRcHdHiyIYvFghxE"
+
     vector_client = QdrantClient(
         url=qdrant_url,
         api_key=qdrant_api_key,
         prefer_grpc=True
     )
-    return embedding_model, ll_model, vector_client
+    return vector_client
+
+
+@st.cache_resource
+def initialize_ll_model() -> LLM:
+    ll_model_name = "deepseek-r1-distill-llama-70b"
+
+    ll_model = Groq(model=ll_model_name)
+    return ll_model
 
 
 def vectorize(embedding_model: BaseEmbedding, vector_client: QdrantClient, collection_name: str):
-    dataset_dir = 'dataset'
+    dataset_dir = "../../dataset"
 
     reader = SimpleDirectoryReader(
         input_dir=dataset_dir,
-        required_exts=['.pdf'],
+        required_exts=[".pdf"],
         recursive=True
     )
     print(f"Number of files found in the directory {dataset_dir}: {len(reader.input_files)}")
@@ -49,7 +55,7 @@ def vectorize(embedding_model: BaseEmbedding, vector_client: QdrantClient, colle
     documents = reader.load_data()
     print(f"Number of documents loaded from the directory {dataset_dir}: {len(documents)}")
 
-    print('Extracting the text content from the list of documents.')
+    print("Extracting the text content from the list of documents.")
     document_contents = [document.text for document in documents]
 
     if not vector_client.collection_exists(collection_name=collection_name):
@@ -61,7 +67,7 @@ def vectorize(embedding_model: BaseEmbedding, vector_client: QdrantClient, colle
             )
         )
     else:
-        raise Exception('Collection already exists in vector database.')
+        raise Exception("Collection already exists in vector database.")
 
     batch_size = 50
     print(
@@ -74,7 +80,7 @@ def vectorize(embedding_model: BaseEmbedding, vector_client: QdrantClient, colle
         vector_client.upload_collection(
             collection_name=collection_name,
             vectors=embeds,
-            payload=[{'context': content} for content in page_content]
+            payload=[{"context": content} for content in page_content]
         )
 
     vector_client.update_collection(
@@ -93,27 +99,32 @@ def search(embedding_model: BaseEmbedding, vector_client: QdrantClient, collecti
     return result
 
 
-def pipeline(embedding_model: BaseEmbedding, vector_client: QdrantClient, collection_name: str, user_query: str,
+def pipeline(embedding_model: BaseEmbedding, vector_client: QdrantClient, collection_name: str, conversation_history: str, user_query: str,
              ll_model: LLM):
     # R - Retriever
     relevant_documents = search(embedding_model, vector_client, collection_name, user_query)
-    context = [doc.payload['context'] for doc in relevant_documents.points]
-    context = "\n".join(context)
+    query_context = [doc.payload["context"] for doc in relevant_documents.points]
+    query_context = "\n".join(query_context)
+
+    # Combine context from retrieved documents and conversation history
+    full_conversation_context = f"{conversation_history}\n\nContext from documents:\n{query_context}"
 
     # A - Augment
-    chat_template = ChatPromptTemplate(message_templates=message_templates)
+    chat_template = ChatPromptTemplate(message_templates=utilities.message_template_2)
 
     # G - Generate
     response = ll_model.complete(
         chat_template.format(
-            context_str=context,
+            context_str=full_conversation_context,
             query=user_query)
     )
     return response
 
 
 def extract_thinking_and_answer(response_text):
-    """Extract thinking process and final answer from response"""
+    """
+    Extract thinking process and final answer from response
+    """
     try:
         thinking = response_text[response_text.find("<think>") + 7:response_text.find("</think>")].strip()
         answer = response_text[response_text.find("</think>") + 8:].strip()
@@ -124,7 +135,18 @@ def extract_thinking_and_answer(response_text):
 
 def main():
     st.title("🕉️ Bhagavad Gita Assistant")
-    embedding_model, llm, client = initialize_models()  # this will run only once, and be saved inside the cache
+
+    collection_name = "bhagavad-gita"
+
+    # This will run only once, and be saved inside the cache
+    embedding_model = initialize_embedding_model()
+    vector_client = initialize_vector_client()
+    ll_model = initialize_ll_model()
+
+    if not vector_client.collection_exists(collection_name):
+        # To read the documents from the source directory,
+        # create vector representation (embeddings) and store to the vector database
+        vectorize(embedding_model, vector_client, collection_name)
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -146,16 +168,21 @@ def main():
                 st.markdown(message["content"])
 
     # Chat input
-    if prompt := st.chat_input("Ask your question about the Bhagavad Gita..."):
+    if user_query := st.chat_input("Ask your question about the Bhagavad Gita..."):
         # Display user message
-        st.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.chat_message("user").markdown(user_query)
+        st.session_state.messages.append({"role": "user", "content": user_query})
 
         # Generate and display response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             with st.spinner("Thinking..."):
-                full_response = pipeline(embedding_model, client, 'bhagavad-gita', prompt, llm)
+                # Build conversation history from past messages for full context
+                conversation_history = "\n".join(
+                    [f"{msg['role'].capitalize()}: {msg['content']}" for msg in st.session_state.messages]
+                )
+
+                full_response = pipeline(embedding_model, vector_client, collection_name, conversation_history, user_query, ll_model)
                 thinking, answer = extract_thinking_and_answer(full_response.text)
 
                 with st.expander("Show thinking process"):
@@ -176,9 +203,5 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
-
-    # To read the documents from the source directory,
-    # create vector representation (embeddings) and store to the vector database
-    # initialize_models()
 
     main()
