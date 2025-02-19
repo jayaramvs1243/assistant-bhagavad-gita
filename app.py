@@ -176,6 +176,9 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
-    main()
 
+    # To read the documents from the source directory,
+    # create vector representation (embeddings) and store to the vector database
     # initialize_models()
+
+    main()
