@@ -1,6 +1,5 @@
-import utilities
-
 import logging
+import os
 import sys
 from time import sleep
 
@@ -11,6 +10,32 @@ from llama_index.core.llms import LLM
 from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.llms.groq import Groq
 from qdrant_client import models, QdrantClient
+from llama_index.core.llms import ChatMessage, MessageRole
+
+
+message_template_2 = [
+    ChatMessage(
+        content="""
+        You are an expert ancient assistant who is well versed in Bhagavad-gita.
+        You are Multilingual, you understand English, Hindi and Sanskrit.
+
+        Always structure your response in this format:
+        <think>
+        [Your step-by-step thinking process here]
+        </think>
+
+        [Your final answer here]
+        
+        We have provided context information below.
+        {context_str}
+        ---------------------
+        Given this information, please answer the question: {query}
+        ---------------------
+        If the question is not from the provided context, say `I don't know. Not enough information received.`
+        """,
+        role=MessageRole.USER,
+    ),
+]
 
 
 @st.cache_resource
@@ -36,6 +61,9 @@ def initialize_vector_client() -> QdrantClient:
 
 @st.cache_resource
 def initialize_ll_model() -> LLM:
+    groq_api_key = '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'
+    os.environ['GROQ_API_KEY'] = groq_api_key
+    
     ll_model_name = "deepseek-r1-distill-llama-70b"
 
     ll_model = Groq(model=ll_model_name)
@@ -110,7 +138,7 @@ def pipeline(embedding_model: BaseEmbedding, vector_client: QdrantClient, collec
     full_conversation_context = f"{conversation_history}\n\nContext from documents:\n{query_context}"
 
     # A - Augment
-    chat_template = ChatPromptTemplate(message_templates=utilities.message_template_2)
+    chat_template = ChatPromptTemplate(message_templates=message_template_2)
 
     # G - Generate
     response = ll_model.complete(
