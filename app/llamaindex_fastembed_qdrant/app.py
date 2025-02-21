@@ -12,6 +12,8 @@ from llama_index.llms.groq import Groq
 from qdrant_client import models, QdrantClient
 from llama_index.core.llms import ChatMessage, MessageRole
 
+import app.utilities.message_template
+
 
 message_template_2 = [
     ChatMessage(
@@ -138,7 +140,7 @@ def pipeline(embedding_model: BaseEmbedding, vector_client: QdrantClient, collec
     full_conversation_context = f"{conversation_history}\n\nContext from documents:\n{query_context}"
 
     # A - Augment
-    chat_template = ChatPromptTemplate(message_templates=message_template_2)
+    chat_template = ChatPromptTemplate(message_templates=app.utilities.message_template.message_template_2)
 
     # G - Generate
     response = ll_model.complete(
